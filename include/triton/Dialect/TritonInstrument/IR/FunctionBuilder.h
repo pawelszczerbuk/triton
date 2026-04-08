@@ -262,6 +262,12 @@ public:
                                          CommitKind::Kind commitKind,
                                          Operation *insertPoint,
                                          bool excludeSelf = false);
+  // verifyNoOutstandingCommits: assert that the outstanding commit table is
+  // zero for the current CTA.
+  void createVerifyNoOutstandingCommitsCall(ImplicitLocOpBuilder &b, Value pred,
+                                            CommitKind::Kind commitKind,
+                                            StringRef pendingAccessType,
+                                            Operation *insertPoint);
 
 private:
   ModuleOp module;

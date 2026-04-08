@@ -9,7 +9,7 @@ from triton.experimental.gluon.language.nvidia import blackwell
 from triton.experimental.gluon.language.nvidia import hopper
 from triton.experimental.gluon.language.nvidia import ampere
 from triton.experimental.gluon.language.nvidia.blackwell import allocate_tensor_memory, mbarrier, tma
-from triton._internal_testing import is_cuda, run_in_process
+from triton._internal_testing import is_cuda, is_hip_gfx1250, run_in_process
 
 
 @pytest.fixture
@@ -492,6 +492,92 @@ def test_tma_store(FAILURE, device, run_wrapper, monkeypatch, num_ctas):
                                            cga_layout=default_cga_layout(num_ctas, 2))
     output_desc = gluon.nvidia.hopper.TensorDescriptor.from_tensor(output, [block_m, XBLOCK.value], shared_layout)
     kernel[(1, )](output_desc, FAILURE=FAILURE, num_warps=4, num_ctas=num_ctas)
+
+
+@pytest.mark.skipif(not is_cuda() or torch.cuda.get_device_capability()[0] < 9, reason="Requires hopper or newer")
+@pytest.mark.parametrize("AWAIT", [False, True])
+def test_tma_store_requires_wait_before_kernel_exit(AWAIT, device, run_wrapper, monkeypatch, num_ctas):
+    if run_wrapper:
+        result = run_in_process(test_tma_store_requires_wait_before_kernel_exit,
+                                (AWAIT, device, False, monkeypatch, num_ctas))
+        if AWAIT:
+            assert result.exc is None
+            assert result.driver_stderr_output == ""
+        else:
+            assert_expected_cuda_failure(result.exc)
+            assert "Kernel exited with pending access. Pending access type: async_copy_shared_to_global" in result.driver_stderr_output
+        return
+
+    monkeypatch.setenv("TRITON_INSTRUMENTATION_MODE", "consan")
+    monkeypatch.setenv("CUDA_LAUNCH_BLOCKING", "1")
+    knobs.refresh_knobs()
+
+    @gluon.jit
+    def kernel(output_desc, AWAIT: ttgl.constexpr):
+        block_m: ttgl.constexpr = XBLOCK * ttgl.num_ctas()
+        cga_layout: ttgl.constexpr = default_cga_layout(ttgl.num_ctas(), 2)
+        smem_layout: ttgl.constexpr = ttgl.NVMMASharedLayout(swizzle_byte_width=128, element_bitwidth=16, rank=2,
+                                                             cga_layout=cga_layout)
+        blocked_layout: ttgl.constexpr = ttgl.BlockedLayout(size_per_thread=[1, XBLOCK], threads_per_warp=[32, 1],
+                                                            warps_per_cta=[4, 1], order=[0, 1], cga_layout=cga_layout)
+        smem = ttgl.allocate_shared_memory(ttgl.float16, [block_m, XBLOCK], smem_layout)
+        smem.store(ttgl.full([block_m, XBLOCK], 42, ttgl.float16, blocked_layout))
+        tma.async_copy_shared_to_global(output_desc, [0, 0], smem)
+        if AWAIT:
+            tma.store_wait(pendings=0)
+
+    block_m = XBLOCK.value * num_ctas
+    output = torch.empty((block_m, XBLOCK.value), device=device, dtype=torch.float16)
+    shared_layout = ttgl.NVMMASharedLayout(swizzle_byte_width=128, element_bitwidth=16, rank=2,
+                                           cga_layout=default_cga_layout(num_ctas, 2))
+    output_desc = gluon.nvidia.hopper.TensorDescriptor.from_tensor(output, [block_m, XBLOCK.value], shared_layout)
+    kernel[(1, )](output_desc, AWAIT=AWAIT, num_warps=4, num_ctas=num_ctas)
+
+
+@pytest.mark.skipif(not is_hip_gfx1250(), reason="Requires gfx1250")
+@pytest.mark.parametrize("AWAIT", [False, True])
+@pytest.mark.parametrize("TDM_KIND", ["load", "store"])
+def test_amd_tdm_requires_wait_before_kernel_exit(AWAIT, TDM_KIND, device, run_wrapper, monkeypatch):
+    if run_wrapper:
+        result = run_in_process(test_amd_tdm_requires_wait_before_kernel_exit,
+                                (AWAIT, TDM_KIND, device, False, monkeypatch))
+        if AWAIT:
+            assert result.exc is None
+            assert result.driver_stderr_output == ""
+        else:
+            assert_expected_cuda_failure(result.exc)
+            assert "Kernel exited with pending access. Pending access type: async_tdm" in result.driver_stderr_output
+        return
+
+    monkeypatch.setenv("TRITON_INSTRUMENTATION_MODE", "consan")
+    monkeypatch.setenv("CUDA_LAUNCH_BLOCKING", "1")
+    knobs.refresh_knobs()
+
+    @gluon.jit
+    def kernel(ptr, AWAIT: ttgl.constexpr, TDM_KIND: ttgl.constexpr):
+        blocked_layout: ttgl.constexpr = ttgl.BlockedLayout([1, 8], [4, 8], [4, 1], [1, 0])
+
+        if TDM_KIND == "load":
+            shared_layout: ttgl.constexpr = ttgl.PaddedSharedLayout.with_identity_for([[32, 4]], [16, 64], [1, 0])
+            desc = ttgl.amd.gfx1250.tdm.make_tensor_descriptor(base=ptr, shape=(32, 128), strides=(128, 1),
+                                                               block_shape=(16, 64), layout=shared_layout)
+            buffer = ttgl.allocate_shared_memory(desc.dtype, shape=desc.block_shape, layout=desc.layout)
+            ttgl.amd.gfx1250.tdm.async_load(desc, offsets=[0, 2], dest=buffer)
+        elif TDM_KIND == "store":
+            shared_layout: ttgl.constexpr = ttgl.SwizzledSharedLayout(1, 1, 1, [1, 0])
+            desc = ttgl.amd.gfx1250.tdm.make_tensor_descriptor(base=ptr, shape=(32, 128), strides=(128, 1),
+                                                               block_shape=(16, 64), layout=shared_layout)
+            value = ttgl.full([16, 64], 1.0, ttgl.float16, blocked_layout)
+            buffer = ttgl.allocate_shared_memory(desc.dtype, shape=desc.block_shape, layout=desc.layout, value=value)
+            ttgl.amd.gfx1250.tdm.async_store(desc, offsets=[0, 2], src=buffer)
+        else:
+            ttgl.static_assert(False, "unsupported TDM_KIND")
+
+        if AWAIT:
+            ttgl.amd.gfx1250.tdm.async_wait(0)
+
+    tensor = torch.empty((32, 128), device=device, dtype=torch.float16)
+    kernel[(1, )](tensor, AWAIT=AWAIT, TDM_KIND=TDM_KIND, num_warps=4)
 
 
 @pytest.mark.skipif(not is_cuda() or torch.cuda.get_device_capability()[0] < 10, reason="Requires blackwell or newer")

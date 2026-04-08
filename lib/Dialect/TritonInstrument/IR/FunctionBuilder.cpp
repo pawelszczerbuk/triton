@@ -2884,4 +2884,41 @@ void FunctionBuilder::createCheckOutstandingCommitsCall(
   }
 }
 
+void FunctionBuilder::createVerifyNoOutstandingCommitsCall(
+    ImplicitLocOpBuilder &b, Value pred, CommitKind::Kind commitKind,
+    StringRef pendingAccessType, Operation *insertPoint) {
+  if (auxData.commits[commitKind].empty())
+    return;
+  if (!pred)
+    pred = arith::ConstantIntOp::create(b, 1, 1);
+
+  ValueType outstandingCommits = auxData.commits[commitKind].at(insertPoint);
+  auto commitsType = cast<RankedTensorType>(outstandingCommits.type);
+  auto resultType = cast<RankedTensorType>(
+      commitsType.cloneWith(std::nullopt, b.getI1Type()));
+
+  std::string message =
+      "Kernel exited with pending access. Pending access type: " +
+      pendingAccessType.str();
+  AssertInfo assertInfo{message, resultType};
+  createCallToCachedFunction(
+      b, "verify_no_outstanding_commits", {pred, outstandingCommits.value},
+      assertInfo, {commitsType},
+      [commitsType, resultType](ImplicitLocOpBuilder &fb, Block *entryBlock) {
+        Value pred = entryBlock->getArgument(0);
+        Value outstandingCommitsPtr = entryBlock->getArgument(1);
+
+        Value outstandingCommits = tti::createLoadScratchMemory(
+            fb, fb.getLoc(), outstandingCommitsPtr, commitsType);
+        Value zero = tti::createConstIntTensor(fb, fb.getLoc(), 0, commitsType);
+        Value commitsEqZero = arith::CmpIOp::create(
+            fb, arith::CmpIPredicate::eq, outstandingCommits, zero);
+        Value trueTensor =
+            tti::createConstIntTensor(fb, fb.getLoc(), 1, resultType);
+        Value result =
+            arith::SelectOp::create(fb, pred, commitsEqZero, trueTensor);
+        triton::ReturnOp::create(fb, result);
+      });
+}
+
 } // namespace mlir::triton::instrument

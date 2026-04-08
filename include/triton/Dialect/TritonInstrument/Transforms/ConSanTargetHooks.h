@@ -156,6 +156,13 @@ public:
 
   virtual SmallVector<CommitKind::Kind>
   getRequiredCommitKinds(ModuleOp module) const = 0;
+
+  // Returns commit kinds that must have no outstanding entries when the
+  // entry-point function returns.
+  virtual SmallVector<CommitKindDesc>
+  getCommitKindsRequiringKernelExitWait(ModuleOp module) const {
+    return {};
+  }
 };
 
 void runConcurrencySanitizer(ModuleOp module, const ConSanTargetHooks *hooks);

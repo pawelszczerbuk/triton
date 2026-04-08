@@ -599,6 +599,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 8 : i32, ttg.shar
     // CHECK: tt.call @__triton_consan_stage_access_for_commit
     // CHECK: tt.call @__triton_consan_commit_accesses
     amdg.async_tdm_copy_local_to_global %desc[%c0_i32, %c0_i32] from %0 : !ttg.memdesc<32x32xf32, #shared, #smem, mutable> -> !tt.tensordesc<tensor<32x32xf32>>
+    // CHECK: tt.call @__triton_consan_verify_no_outstanding_commits
     tt.return
   }
 }
@@ -622,6 +623,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 8 : i32, ttg.shar
     // CHECK: tt.call @__triton_consan_stage_access_for_commit
     // CHECK: tt.call @__triton_consan_commit_accesses
     amdg.async_tdm_copy_local_to_global %out_desc[%c0_i32, %c0_i32] from %0 : !ttg.memdesc<32x32xf32, #shared, #smem, mutable> -> !tt.tensordesc<tensor<32x32xf32>>
+    // CHECK: tt.call @__triton_consan_verify_no_outstanding_commits
     tt.return
   }
 }
@@ -742,6 +744,7 @@ module attributes {"ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 8 : i32, ttg.shar
     // CHECK: tt.call @__triton_consan_clear_outstanding_commits_transfer_both
     amdg.async_tdm_wait {num = 0 : i32}
     ttg.local_load %0 : !ttg.memdesc<32x32xf32, #shared, #smem, mutable> -> tensor<32x32xf32, #blocked>
+    // CHECK: tt.call @__triton_consan_verify_no_outstanding_commits
     tt.return
   }
 }

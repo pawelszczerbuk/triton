@@ -241,9 +241,33 @@ public:
     ImplicitLocOpBuilder b(entryPoint.getLoc(), entryPoint);
     b.setInsertionPointToStart(&entryPoint.getBody().front());
     instrumentMemoryOperations(b, funcBuilder);
+    instrumentKernelExit(b, funcBuilder, entryPoint);
   }
 
 private:
+  void instrumentKernelExit(ImplicitLocOpBuilder &b,
+                            tti::FunctionBuilder &funcBuilder,
+                            tt::FuncOp entryPoint) {
+    SmallVector<CommitKindDesc> requiredExitWaits =
+        hooks->getCommitKindsRequiringKernelExitWait(module);
+    if (requiredExitWaits.empty())
+      return;
+
+    entryPoint.walk([&](tt::ReturnOp returnOp) {
+      Operation *op = returnOp.getOperation();
+      b.setLoc(op->getLoc());
+      b.setInsertionPoint(op);
+
+      Value lock = auxData.lock.at(op).value;
+      tti::ExperimentalLockAcquireOp::create(b, lock, nullptr);
+      for (const CommitKindDesc &commitKindDesc : requiredExitWaits) {
+        funcBuilder.createVerifyNoOutstandingCommitsCall(
+            b, nullptr, commitKindDesc.kind, commitKindDesc.operationDesc, op);
+      }
+      tti::ExperimentalLockReleaseOp::create(b, lock, nullptr);
+    });
+  }
+
   void instrumentMemoryOperations(ImplicitLocOpBuilder &b,
                                   tti::FunctionBuilder &funcBuilder) {
     module.walk([&](Operation *op) {

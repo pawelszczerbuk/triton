@@ -170,6 +170,19 @@ public:
       kinds.push_back(tti::CommitKind::AsyncCp);
     return kinds;
   }
+
+  SmallVector<CommitKindDesc>
+  getCommitKindsRequiringKernelExitWait(ModuleOp module) const override {
+    bool needsTdmWait = false;
+    module.walk([&](Operation *op) {
+      if (isa<ttag::AsyncTDMCopyGlobalToLocalOp,
+              ttag::AsyncTDMCopyLocalToGlobalOp>(op))
+        needsTdmWait = true;
+    });
+    if (!needsTdmWait)
+      return {};
+    return {{tti::CommitKind::TmaStore, "async_tdm"}};
+  }
 };
 
 void registerConSanAMDHooks() {

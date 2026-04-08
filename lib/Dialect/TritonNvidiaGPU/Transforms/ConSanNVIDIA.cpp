@@ -265,6 +265,18 @@ public:
       kinds.push_back(tti::CommitKind::TmaStore);
     return kinds;
   }
+
+  SmallVector<CommitKindDesc>
+  getCommitKindsRequiringKernelExitWait(ModuleOp module) const override {
+    bool needsTmaStoreWait = false;
+    module.walk([&](Operation *op) {
+      if (isa<ttng::AsyncTMACopyLocalToGlobalOp>(op))
+        needsTmaStoreWait = true;
+    });
+    if (!needsTmaStoreWait)
+      return {};
+    return {{tti::CommitKind::TmaStore, "async_copy_shared_to_global"}};
+  }
 };
 
 void registerConSanNVIDIAHooks() {
