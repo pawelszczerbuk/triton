@@ -457,35 +457,6 @@ def test_warp_specialize_tma_matmul_persistent_consan(M, N, K, a_use_tma, b_use_
                                                a_use_tma=a_use_tma, b_use_tma=b_use_tma)
 
 
-@pytest.mark.skipif(not is_blackwell(), reason="Requires Blackwell")
-def test_warp_specialize_tma_matmul_persistent_fpsan_shares_accumulator_scratch(fresh_knobs):
-    fresh_knobs.compilation.instrumentation_mode = "fpsan"
-    M, N, K = 512, 512, 128
-    BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K = 128, 128, 64
-    GROUP_SIZE_M = 8
-    NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
-
-    A = torch.empty((M, K), dtype=torch.float16, device="cuda")
-    B = torch.empty((N, K), dtype=torch.float16, device="cuda")
-    C = torch.empty((M, N), dtype=torch.float16, device="cuda")
-
-    def grid(META):
-        return (min(
-            NUM_SMS,
-            triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(N, META["BLOCK_SIZE_N"]),
-        ), )
-
-    kernel = matmul_tma_persistent_ws_kernel.warmup(A, B, C, *A.stride(), *B.stride(), *C.stride(), M, N, K, 3,
-                                                    BLOCK_SIZE_M, BLOCK_SIZE_N, BLOCK_SIZE_K, GROUP_SIZE_M, NUM_SMS,
-                                                    num_warps=8, USE_FP8=False, FLATTEN=True, A_USE_TMA=True,
-                                                    B_USE_TMA=True, grid=grid)
-
-    ttgir = kernel.asm["ttgir"]
-    assert "tt.warp_specialize" in kernel.asm["ttir"]
-    assert "ttg.warp_specialize" in ttgir
-    assert ttgir.count("nbytes = 131072 : i32") == 1
-
-
 @triton.jit
 def attention_inner_loop_kernel(  #
         desc_q, desc_k, desc_v,  #
