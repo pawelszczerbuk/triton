@@ -151,6 +151,18 @@ public:
             return itRegion->second;
           it->second.erase(itRegion);
         }
+        auto itCanonical = it->second.find(nullptr);
+        if (itCanonical != it->second.end()) {
+          if (itCanonical->second.ptr && itCanonical->second.ptr.getType()) {
+            Value ptr =
+                remapToScope(itCanonical->second.ptr, rewriter, scope,
+                             alloc.getLoc());
+            ScratchInfo info{ptr, itCanonical->second.tensorType};
+            scratchMap[memdesc][scope] = info;
+            return info;
+          }
+          it->second.erase(itCanonical);
+        }
       }
 
       OpBuilder::InsertionGuard guard(rewriter);
@@ -176,8 +188,10 @@ public:
           return std::nullopt;
       }
 
-      ptr = remapToScope(ptr, rewriter, scope, loc);
+      ScratchInfo canonicalInfo{ptr, tensorTy};
+      scratchMap[memdesc][nullptr] = canonicalInfo;
 
+      ptr = remapToScope(ptr, rewriter, scope, loc);
       ScratchInfo info{ptr, tensorTy};
       scratchMap[memdesc][scope] = info;
       return info;
