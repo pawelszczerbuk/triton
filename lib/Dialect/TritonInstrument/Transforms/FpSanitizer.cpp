@@ -1859,9 +1859,8 @@ struct TMEMCopyPattern : public OpRewritePattern<ttng::TMEMCopyOp> {
     auto dstMemTy = cast<ttg::MemDescType>(op.getDst().getType());
     auto srcEncoding =
         scratch->getScratchEncoding(rewriter, op.getDst(), dstMemTy);
-    auto srcRegTy =
-        RankedTensorType::get(srcMemTy.getShape(), srcMemTy.getElementType(),
-                              srcEncoding);
+    auto srcRegTy = RankedTensorType::get(
+        srcMemTy.getShape(), srcMemTy.getElementType(), srcEncoding);
     Value srcReg =
         ttg::LocalLoadOp::create(rewriter, loc, srcRegTy, op.getSrc(), Value())
             .getResult();

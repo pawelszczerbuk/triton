@@ -1747,28 +1747,22 @@ def test_tmem_copy_scales_in_warp_specialize_partition(device, fresh_knobs):
 
     @gluon.jit
     def kernel(in_ptr, out_ptr):
-        blocked: gl.constexpr = gl.BlockedLayout(
-            [1, 4], [32, 1], [gl.num_warps(), 1], [1, 0]
-        )
-        in_ptrs = (
-            in_ptr + gl.arange(0, SMEM_H)[:, None] * SMEM_W + gl.arange(0, SMEM_W)[None, :]
-        )
+        blocked: gl.constexpr = gl.BlockedLayout([1, 4], [32, 1], [gl.num_warps(), 1], [1, 0])
+        in_ptrs = (in_ptr + gl.arange(0, SMEM_H)[:, None] * SMEM_W + gl.arange(0, SMEM_W)[None, :])
         value = gl.load(gl.set_auto_layout(in_ptrs, blocked))
 
-        smem_layout: gl.constexpr = gl.SharedLinearLayout(
-            offset_bases=[
-                [0, 1],
-                [0, 2],
-                [32, 0],
-                [0, 4],
-                [1, 0],
-                [2, 0],
-                [4, 0],
-                [8, 0],
-                [16, 0],
-                [0, 8],
-            ]
-        )
+        smem_layout: gl.constexpr = gl.SharedLinearLayout(offset_bases=[
+            [0, 1],
+            [0, 2],
+            [32, 0],
+            [0, 4],
+            [1, 0],
+            [2, 0],
+            [4, 0],
+            [8, 0],
+            [16, 0],
+            [0, 8],
+        ])
         smem = gl.allocate_shared_memory(gl.int8, (SMEM_H, SMEM_W), layout=smem_layout)
         smem.store(value)
 
@@ -1790,9 +1784,7 @@ def test_tmem_copy_scales_in_warp_specialize_partition(device, fresh_knobs):
         mbarrier.invalidate(bar)
         gl.store(out_ptr, 1)
 
-    x = torch.randint(
-        size=(smem_h, smem_w), low=-100, high=100, dtype=torch.int8, device=device
-    )
+    x = torch.randint(size=(smem_h, smem_w), low=-100, high=100, dtype=torch.int8, device=device)
     out = torch.empty((), device=device, dtype=torch.int32)
     kernel[(1, )](x, out, num_warps=4)
     torch.testing.assert_close(out, torch.ones_like(out))
