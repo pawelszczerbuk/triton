@@ -1791,6 +1791,8 @@ struct TMEMLoadPattern : public OpRewritePattern<ttng::TMEMLoadOp> {
     if (!result)
       return failure();
 
+    createGlobalScratchBarrier(rewriter, loc);
+
     if (op.getNumResults() == 1) {
       rewriter.replaceOp(op, result);
       return success();
@@ -1824,6 +1826,8 @@ struct TMEMStorePattern : public OpRewritePattern<ttng::TMEMStoreOp> {
       return failure();
     if (!createStoreScratchMemory(rewriter, loc, info->ptr, op.getSrc(), srcTy))
       return failure();
+
+    createGlobalScratchBarrier(rewriter, loc);
 
     if (op.getNumResults() == 0) {
       rewriter.eraseOp(op);
@@ -1864,6 +1868,8 @@ struct TMEMCopyPattern : public OpRewritePattern<ttng::TMEMCopyOp> {
             .getResult();
     if (!createStoreScratchMemory(rewriter, loc, info->ptr, srcReg, srcRegTy))
       return failure();
+
+    createGlobalScratchBarrier(rewriter, loc);
 
     rewriter.eraseOp(op);
     return success();
